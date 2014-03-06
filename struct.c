@@ -5,6 +5,7 @@
 
 
 static int _struct_api_members(lua_State *L);
+static int _struct_api_type(lua_State *L);
 
 
 int luaopen_struct(lua_State *L)
@@ -12,6 +13,7 @@ int luaopen_struct(lua_State *L)
   lua_newtable(L);
   luaL_Reg struct_module_funcs[] = {
     {"members", _struct_api_members},
+    {"type", _struct_api_type},
     {NULL, NULL}
   };
   luaL_setfuncs(L, struct_module_funcs, 0);
@@ -38,6 +40,16 @@ int _struct_api_members(lua_State *L)
   return 1;
 }
 
+int _struct_api_type(lua_State *L)
+{
+  lua_getmetatable(L, 1); /* TOP: mt */
+  lua_getfield(L, -1, "__type__"); /* TOP: mt.__type__ */
+  lua_struct_t *T = (lua_struct_t*) lua_touserdata(L, -1);
+  lua_pushstring(L, T->type_name); /* TOP: type_name */
+  lua_remove(L, -2);
+  lua_remove(L, -2);
+  return 1;
+}
 
 
 static int _struct_constructor(lua_State *L);

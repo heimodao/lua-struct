@@ -12,6 +12,7 @@ local function test1()
       assert(d.length == i*2)
       dragons[i] = d
       assert(#struct.members(d) == 4)
+      assert(struct.type(d) == 'dragon')
    end
    assert(dragons[50].weight == 50.0)
    for k,v in pairs(getmetatable(dragons[50]).__instances__) do
