@@ -11,6 +11,12 @@ enum {
 
 
 typedef struct {
+  const char *method_name;
+  lua_CFunction method;
+} lua_struct_method_t;
+
+
+typedef struct {
   const char *member_name;
   ptrdiff_t offset;
   int data_type;
@@ -23,6 +29,7 @@ typedef struct {
   int (*new)(void*);
   int (*del)(void*);
   lua_struct_member_t *members;
+  lua_struct_method_t *methods;
 } lua_struct_t;
 
 

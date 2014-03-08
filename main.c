@@ -23,7 +23,7 @@ int dragon_new(void *obj)
 
 int dragon_del(void *obj)
 {
-  //  printf("cleaning up after a dragon\n");
+  printf("cleaning up after a dragon\n");
   return 0;
 }
 
@@ -46,12 +46,17 @@ int luaopen_legend(lua_State *L)
     {"name", offsetof(dragon, name), LSTRUCT_STRING},
     {NULL, 0, 0},
   };
+  lua_struct_method_t lua_dragon_methods[] = {
+    {"speak", dragon_speak},
+    {NULL, NULL},
+  };
   lua_struct_t lua_dragon = {
     .type_name = "dragon",
     .alloc_size = sizeof(dragon),
     .new = dragon_new,
     .del = dragon_del,
     .members = lua_dragon_members,
+    .methods = lua_dragon_methods,
   };
 
   lua_struct_register(L, lua_dragon);

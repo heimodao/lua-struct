@@ -79,6 +79,7 @@ int lua_struct_pushmember(lua_State *L, void *obj,
 
 int lua_struct_register(lua_State *L, lua_struct_t type)
 {
+  int n;
   luaL_newmetatable(L, type.type_name); /* TOP: mt */
 
 
@@ -96,19 +97,34 @@ int lua_struct_register(lua_State *L, lua_struct_t type)
    * mt.__members__
    * -------------------------------------------------- */
   lua_newtable(L); /* TOP: mt.__members__ */
-  int n = 0;
+  n = 0;
   while (type.members[n].member_name) {
     lua_struct_member_t *M = (lua_struct_member_t*) /* TOP: member */
       lua_newuserdata(L, sizeof(lua_struct_member_t));
     *M = type.members[n];
-    lua_setfield(L, -2, M->member_name); /* TOP: __members__ table */
+    lua_setfield(L, -2, M->member_name); /* TOP: mt.__members__ */
     n += 1;
   }
   lua_setfield(L, -2, "__members__"); /* TOP: mt */
 
 
   /* ----------------------------------------------------
-   * obj.__instances__ (table of instances of given type)
+   * mt.__methods__
+   * -------------------------------------------------- */
+  lua_newtable(L); /* TOP: mt.__methods__ */
+  n = 0;
+  while (type.methods[n].method_name) {
+    lua_struct_method_t *M = (lua_struct_method_t*) /* TOP: method */
+      lua_newuserdata(L, sizeof(lua_struct_method_t));
+    *M = type.methods[n];
+    lua_setfield(L, -2, M->method_name); /* TOP: mt.__methods__ */
+    n += 1;
+  }
+  lua_setfield(L, -2, "__methods__"); /* TOP: mt */
+
+
+  /* ----------------------------------------------------
+   * mt.__instances__ (table of instances of given type)
    * -------------------------------------------------- */
   lua_newtable(L); /* TOP: mt.__instances__ */
   lua_setfield(L, -2, "__instances__"); /* TOP: mt */
@@ -159,35 +175,43 @@ int _struct_mt_index(lua_State *L)
 {
   void *obj = lua_touserdata(L, 1);
   const char *key = luaL_checkstring(L, 2);
+  int top = lua_gettop(L);
 
-  lua_getmetatable(L, 1); /* TOP: mt */
-  lua_getfield(L, -1, "__type__"); /* TOP: mt.__type__ userdata */
-  lua_struct_t *T = (lua_struct_t*) lua_touserdata(L, -1);
-  lua_pop(L, 1); /* TOP: mt */
-  lua_getfield(L, -1, "__members__"); /* TOP: __members__ table */
-  lua_getfield(L, -1, key); /* TOP: mt.__members__[key] */
-  lua_struct_member_t *M = (lua_struct_member_t*) lua_touserdata(L, -1);
-  lua_pop(L, 3); /* TOP: fresh */
+  lua_getmetatable(L, 1);                   int imetat = ++top;
+  lua_getfield(L, imetat, "__type__");      int itypeu = ++top;
+  lua_getfield(L, imetat, "__members__");   int imembt = ++top;
+  lua_getfield(L, imetat, "__methods__");   int imetht = ++top;
+  lua_getfield(L, imetat, "__instances__"); int iinstt = ++top;
+  lua_getfield(L, imembt, key);             int ibkeyu = ++top;
+  lua_getfield(L, imetht, key);             int itkeyu = ++top;
 
-  if (M == NULL) {
-    luaL_error(L, "'%s' object has no member '%s'", T->type_name, key);
-    return 0;
-  }
-  else if (M->data_type == LSTRUCT_DOUBLE) {
-    lua_pushnumber(L, *((double*)(obj + M->offset)));
-  }
-  else if (M->data_type == LSTRUCT_OBJECT) {
-    lua_getmetatable(L, 1); /* TOP: mt */
-    lua_getfield(L, -1, "__instances__"); /* TOP: mt.__instances__ */
-    lua_rawgetp(L, -1, obj); /* TOP: mt.__instances__[obj] */
-    lua_rawgeti(L, -1, M->offset); /* TOP: mt.__instances__[obj].value */
-    lua_replace(L, -4);
-    lua_pop(L, 2);
-  }
-  else if (M->data_type == LSTRUCT_STRING) {
-    lua_pushstring(L, *((const char **)(obj + M->offset)));
-  }
+  lua_struct_t *type = (lua_struct_t *) lua_touserdata(L, itypeu);
+  lua_struct_member_t *memb = (lua_struct_member_t*) lua_touserdata(L, ibkeyu);
+  lua_struct_method_t *meth = (lua_struct_method_t*) lua_touserdata(L, itkeyu);
 
+  if (memb) {
+    switch (memb->data_type) {
+    case LSTRUCT_DOUBLE:
+      lua_pushnumber(L, *((double *)(obj + memb->offset)));
+      break;
+    case LSTRUCT_STRING:
+      lua_pushstring(L, *((const char **)(obj + memb->offset)));
+      break;
+    case LSTRUCT_OBJECT:
+      lua_rawgetp(L, iinstt, obj);
+      lua_rawgeti(L, -1, memb->offset);
+      lua_remove(L, -2);
+      break;
+    }
+  }
+  else if (meth) {
+    lua_pushcfunction(L, meth->method);
+  }
+  else {
+    luaL_error(L, "'%s' object has no member '%s'", type->type_name, key);
+  }
+  lua_replace(L, imetat);
+  lua_settop(L, imetat);
   return 1;
 }
 
@@ -196,41 +220,44 @@ int _struct_mt_newindex(lua_State *L)
 {
   void *obj = lua_touserdata(L, 1);
   const char *key = luaL_checkstring(L, 2);
+  int top = lua_gettop(L);
 
-  lua_getmetatable(L, 1); /* TOP: mt */
-  lua_getfield(L, -1, "__type__"); /* TOP: mt.__type__ userdata */
-  lua_struct_t *T = (lua_struct_t*) lua_touserdata(L, -1);
-  lua_pop(L, 1); /* TOP: mt */
-  lua_getfield(L, -1, "__members__"); /* TOP: __members__ table */
-  lua_getfield(L, -1, key); /* TOP: mt.__members__[key] */
-  lua_struct_member_t *M = (lua_struct_member_t*) lua_touserdata(L, -1);
-  lua_pop(L, 3); /* TOP: fresh */
+  lua_getmetatable(L, 1);                   int imetat = ++top;
+  lua_getfield(L, imetat, "__type__");      int itypeu = ++top;
+  lua_getfield(L, imetat, "__members__");   int imembt = ++top;
+  lua_getfield(L, imetat, "__methods__");   int imetht = ++top;
+  lua_getfield(L, imetat, "__instances__"); int iinstt = ++top;
+  lua_getfield(L, imembt, key);             int ibkeyu = ++top;
+  lua_getfield(L, imetht, key);             int itkeyu = ++top;
 
-  if (M == NULL) {
-    luaL_error(L, "'%s' object has no member '%s'", T->type_name, key);
-  }
-  else if (M->data_type == LSTRUCT_DOUBLE) {
-    *((double*)(obj + M->offset)) = luaL_checknumber(L, 3);
-  }
-  else if (M->data_type == LSTRUCT_OBJECT) {
-    *((int*)(obj + M->offset)) = lua_type(L, 3);
-    lua_getmetatable(L, 1); /* TOP: mt */
-    lua_getfield(L, -1, "__instances__"); /* TOP: mt.__instances__ */
-    lua_rawgetp(L, -1, obj); /* TOP: mt.__instances__[obj] */
-    lua_pushvalue(L, 3); /* TOP: val */
-    lua_rawseti(L, -2, M->offset); /* TOP: mt.__instances__[obj] */
-    lua_pop(L, 3);
-  }
-  else if (M->data_type == LSTRUCT_STRING) {
-    *((const char **)(obj + M->offset)) = luaL_checkstring(L, 3);
-    lua_getmetatable(L, 1); /* TOP: mt */
-    lua_getfield(L, -1, "__instances__"); /* TOP: mt.__instances__ */
-    lua_rawgetp(L, -1, obj); /* TOP: mt.__instances__[obj] */
-    lua_pushvalue(L, 3); /* TOP: val */
-    lua_rawseti(L, -2, M->offset); /* TOP: mt.__instances__[obj] */
-    lua_pop(L, 3);
-  }
+  lua_struct_t *type = (lua_struct_t *) lua_touserdata(L, itypeu);
+  lua_struct_member_t *memb = (lua_struct_member_t*) lua_touserdata(L, ibkeyu);
+  lua_struct_method_t *meth = (lua_struct_method_t*) lua_touserdata(L, itkeyu);
 
+  if (memb) {
+    switch (memb->data_type) {
+    case LSTRUCT_DOUBLE:
+      *((double *)(obj + memb->offset)) = luaL_checknumber(L, 3);
+      break;
+    case LSTRUCT_STRING:
+      *((const char **)(obj + memb->offset)) = luaL_checkstring(L, 3);
+      break;
+    case LSTRUCT_OBJECT:
+      *((int *)(obj + memb->offset)) = lua_type(L, 3);
+      lua_rawgetp(L, iinstt, obj);
+      lua_pushvalue(L, 3);
+      lua_rawseti(L, -2, memb->offset);
+      lua_pop(L, 1);
+      break;
+    }
+  }
+  else if (meth) {
+    luaL_error(L, "cannot assign to method '%s.%s'", type->type_name, key);
+  }
+  else {
+    luaL_error(L, "'%s' object has no member '%s'", type->type_name, key);
+  }
+  lua_settop(L, 3);
   return 0;
 }
 
